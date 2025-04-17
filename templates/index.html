@@ -2,60 +2,163 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hexagon Tile Game</title>
+    <title>Hex Clash</title>
     <style>
         body {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
             font-family: Arial, sans-serif;
-            background-color: #f0f0f0;
+            text-align: center;
+            background-color: #f0f4f7;
         }
-        #board {
-            display: grid;
-            grid-template-columns: repeat(10, 60px);
-            grid-template-rows: repeat(10, 52px);
-            gap: 2px;
+        h1 {
+            margin-top: 20px;
         }
-        .hex {
+        .board {
+            display: flex;
+            flex-wrap: wrap;
+            width: 400px;
+            margin: 20px auto;
+            justify-content: center;
+        }
+        .tile {
             width: 60px;
-            height: 52px;
+            height: 60px;
             background-color: lightgray;
-            clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
-            transition: background-color 0.2s;
+            clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
+            margin: 3px;
+            cursor: pointer;
+            display: inline-block;
+            transition: 0.2s;
+        }
+        .tile.disabled {
+            cursor: not-allowed;
+            opacity: 0.8;
+        }
+        .button {
+            padding: 10px 20px;
+            font-size: 16px;
+            background-color: #0077cc;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            margin-top: 10px;
+            cursor: pointer;
+        }
+        .button:hover {
+            background-color: #005fa3;
+        }
+        .scoreboard {
+            margin: 10px 0;
+            font-size: 18px;
+        }
+        .winner {
+            color: darkred;
+            font-size: 24px;
+            font-weight: bold;
+        }
+        .rules {
+            max-width: 600px;
+            margin: 30px auto;
+            text-align: left;
+            background: #ffffff;
+            padding: 15px 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }
     </style>
 </head>
 <body>
+    <h1>Hex Clash</h1>
+    <p>Current Turn: <strong id="player">{{ current_player }}</strong></p>
 
-<div id="board">
-    <!-- Hexagonal tiles will be added here on clicks -->
-</div>
+    <div class="scoreboard">
+        Player 1 (Green): <strong id="score1">{{ scores["green"] }}</strong> |
+        Player 2 (Blue): <strong id="score2">{{ scores["blue"] }}</strong>
+    </div>
 
-<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-<script>
-    $(document).ready(function() {
-        // Create an empty board of hex tiles
-        for (let i = 0; i < 100; i++) {
-            const hexTile = $('<div class="hex"></div>');
-            hexTile.data("clicked", false);  // Track if a tile has been clicked
-            $('#board').append(hexTile);
+    {% if winner %}
+        <div class="winner">🎉 {{ winner }} wins the game! 🎉</div>
+    {% endif %}
+
+    <button class="button" onclick="resetGame()">🔁 Reset Game</button>
+
+    <div class="board" id="board"></div>
+
+    <div class="rules">
+        <h3>📜 Game Rules:</h3>
+        <ul>
+            <li>Players take turns clicking on unclaimed hex tiles.</li>
+            <li>Player 1 places <strong>green</strong> tiles.</li>
+            <li>Player 2 places <strong>blue</strong> tiles.</li>
+            <li>The first player to claim <strong>5 tiles</strong> wins the game.</li>
+            <li>You can't click on a tile that’s already taken.</li>
+            <li>Click “Reset Game” to start a new match.</li>
+        </ul>
+    </div>
+
+    <script>
+        const board = document.getElementById("board");
+        const playerSpan = document.getElementById("player");
+        const score1 = document.getElementById("score1");
+        const score2 = document.getElementById("score2");
+        const size = 5;
+        const tiles = {{ tiles | tojson }};
+        const winner = "{{ winner or '' }}";
+
+        for (let y = 0; y < size; y++) {
+            for (let x = 0; x < size; x++) {
+                const tile = document.createElement("div");
+                tile.className = "tile";
+                tile.dataset.x = x;
+                tile.dataset.y = y;
+                const key = `${x},${y}`;
+                if (tiles[key]) {
+                    tile.style.backgroundColor = tiles[key];
+                    tile.classList.add("disabled");
+                }
+
+                tile.addEventListener("click", () => {
+                    if (tile.classList.contains("disabled") || winner) return;
+                    fetch("/add_tile", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ x: x, y: y })
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.status === "ok") {
+                            tile.style.backgroundColor = data.color;
+                            tile.classList.add("disabled");
+                            playerSpan.innerText = data.next_player;
+                            updateScores(data.color);
+                            if (data.winner) {
+                                alert(data.winner + " wins!");
+                                location.reload();
+                            }
+                        } else if (data.status === "occupied") {
+                            alert("Tile already taken!");
+                        } else if (data.status === "game_over") {
+                            alert("Game already over!");
+                        }
+                    });
+                });
+
+                board.appendChild(tile);
+            }
         }
 
-        // Add color to hex tiles on click
-        $('#board').on('click', '.hex', function() {
-            if (!$(this).data("clicked")) {  // Only allow one click per tile
-                $.getJSON('/add_tile', function(data) {
-                    $(this).css('background-color', data.color);
-                    $(this).data("clicked", true);  // Mark as clicked
-                }.bind(this));
+        function updateScores(color) {
+            if (color === "green") {
+                score1.innerText = parseInt(score1.innerText) + 1;
+            } else {
+                score2.innerText = parseInt(score2.innerText) + 1;
             }
-        });
-    });
-</script>
+        }
 
+        function resetGame() {
+            fetch("/reset", { method: "POST" })
+                .then(res => res.json())
+                .then(() => location.reload());
+        }
+    </script>
 </body>
 </html>
